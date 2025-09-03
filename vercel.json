@@ -1,0 +1,38 @@
+{
+  
+  "installCommand": "npm install --prefix frontend && pip install -r backend/requirements.txt",
+  "builds": [
+    
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/next"
+    },
+   
+    {
+      "src": "backend/app.py",
+      "use": "@vercel/python",
+      "config": {
+        "runtime": "python3.9",
+        "maxLambdaSize": "15mb",
+        "excludeFiles": [
+          "frontend/**"
+        ],
+        "includeFiles": [
+          "backend/requirements.txt",
+          "backend/**/*.py"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    
+    {
+      "src": "/api/(.*)",
+      "dest": "/backend/app.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/frontend/$1"
+    }
+  ]
+}
