@@ -45,19 +45,20 @@ const Agent = ({
     };
 
     const onMessage = (message: Message) => {
-      if (message.type === "transcript" && message.transcriptType === "final") {
+      if (
+        message.type === "transcript" &&
+        message.transcriptType === "final"
+      ) {
         const newMessage = { role: message.role, content: message.transcript };
         setMessages((prev) => [...prev, newMessage]);
       }
     };
 
     const onSpeechStart = () => {
-      console.log("speech start");
       setIsSpeaking(true);
     };
 
     const onSpeechEnd = () => {
-      console.log("speech end");
       setIsSpeaking(false);
     };
 
@@ -88,8 +89,6 @@ const Agent = ({
     }
 
     const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      console.log("handleGenerateFeedback");
-
       const { success, feedbackId: id } = await createFeedback({
         interviewId: interviewId!,
         userId: userId!,
@@ -100,7 +99,6 @@ const Agent = ({
       if (success && id) {
         router.push(`/interview/${interviewId}/feedback`);
       } else {
-        console.log("Error saving feedback");
         router.push("/");
       }
     };
@@ -114,35 +112,66 @@ const Agent = ({
     }
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
- const handleCall = async () => {
+  // UPDATED FUNCTION
+  const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
 
     if (type === "generate") {
-      await vapi.start(
-        undefined,
-        undefined,
-        undefined,
-        process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!,
-        {
-          variableValues: {
-            username: userName,
-            userid: userId,
-          },
-        }
-      );
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
+      if (
+        !process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID &&
+        !interviewer
+      ) {
+        alert("Assistant or Workflow ID must be provided to start the call.");
+        setCallStatus(CallStatus.INACTIVE);
+        return;
       }
+      try {
+        await vapi.start(
+          interviewer,
+          undefined,
+          undefined,
+          process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID,
+          {
+            variableValues: {
+              username: userName,
+              userid: userId,
+            },
+          }
+        );
+      } catch (error: any) {
+        alert(
+          "Something went wrong: " +
+            (error?.message || "Failed to start interview.")
+        );
+        setCallStatus(CallStatus.INACTIVE);
+      }
+      return;
+    }
 
+    // For normal interview (not generate)
+    if (!interviewer) {
+      alert("Assistant (interviewer) must be provided to start the call.");
+      setCallStatus(CallStatus.INACTIVE);
+      return;
+    }
+
+    let formattedQuestions = "";
+    if (questions) {
+      formattedQuestions = questions.map((question) => `- ${question}`).join("\n");
+    }
+
+    try {
       await vapi.start(interviewer, {
         variableValues: {
           questions: formattedQuestions,
         },
       });
+    } catch (error: any) {
+      alert(
+        "Something went wrong: " +
+          (error?.message || "Failed to start interview.")
+      );
+      setCallStatus(CallStatus.INACTIVE);
     }
   };
 
