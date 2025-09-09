@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { interviewer } from "@/constants"; // Keep this if used elsewhere, but not directly for 'generate' flow
+import { interviewer } from "@/constants"; // Keep this import for the 'normal' type flow
 import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
@@ -21,14 +21,13 @@ interface SavedMessage {
   content: string;
 }
 
-// Assuming AgentProps is defined elsewhere, no change needed here
 interface AgentProps {
   userName: string;
   userId: string;
-  interviewId: string | null;
-  feedbackId: string | null;
-  type: "generate" | "normal"; // Assuming 'type' can be 'generate' or 'normal'
-  questions?: string[]; // Assuming 'questions' is an array of strings
+  interviewId?: string;
+  feedbackId?: string;
+  type: "generate" | "normal";
+  questions?: string[];
 }
 
 
@@ -55,7 +54,7 @@ const Agent = ({
       setCallStatus(CallStatus.FINISHED);
     };
 
-    const onMessage = (message: any) => { // Use 'any' or define Vapi's Message type if available
+    const onMessage = (message: any) => {
       if (
         message.type === "transcript" &&
         message.transcriptType === "final"
@@ -100,17 +99,16 @@ const Agent = ({
     }
 
     const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      // Ensure interviewId is not null for createFeedback
-      if (!interviewId) {
-        console.error("Interview ID is null, cannot generate feedback.");
-        router.push("/"); // Redirect if critical info is missing
+      if (!interviewId || !userId) {
+        console.error("Missing interviewId or userId for feedback generation.");
+        router.push("/");
         return;
       }
       const { success, feedbackId: id } = await createFeedback({
         interviewId: interviewId,
-        userId: userId!, // Ensure userId is handled correctly, possibly non-null asserted or checked
+        userId: userId,
         transcript: messages,
-        feedbackId,
+        feedbackId: feedbackId,
       });
 
       if (success && id) {
@@ -122,7 +120,7 @@ const Agent = ({
 
     if (callStatus === CallStatus.FINISHED) {
       if (type === "generate") {
-        router.push("/"); // Redirect after generating (if that's the desired flow)
+        router.push("/");
       } else {
         handleGenerateFeedback(messages);
       }
@@ -135,7 +133,6 @@ const Agent = ({
     if (type === "generate") {
       const workflowIdToUse = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
 
-      // --- CRITICAL CHANGE: Simplified check and vapi.start() call ---
       if (!workflowIdToUse) {
         alert("Vapi Workflow ID must be provided to start the call for 'generate' type.");
         setCallStatus(CallStatus.INACTIVE);
@@ -143,15 +140,25 @@ const Agent = ({
       }
 
       try {
-        await vapi.start({ // Pass a single options object to vapi.start
-          workflowId: workflowIdToUse, // Explicitly use the workflow ID
+        // --- THIS IS THE CRITICAL MODIFICATION ---
+        // Explicitly start the Vapi call using the workflowId, not the 'interviewer' Assistant object.
+        await vapi.start({
+          workflowId: workflowIdToUse, // This correctly targets your Vapi Workflow
           variableValues: {
             username: userName,
             userid: userId,
-            // (level, amount, techstack, role, type are collected by Vapi's workflow,
-            // so they are NOT passed from here)
           },
+          // You can still merge other Assistant properties if your workflow doesn't define them
+          // and you want specific voice/model settings from your 'interviewer' constant.
+          // For instance:
+          // assistant: {
+          //   model: interviewer.model,
+          //   voice: interviewer.voice,
+          //   // Do NOT include systemPrompt from interviewer if you want your Vapi Workflow's prompt to apply
+          // }
         });
+        // --- END OF CRITICAL MODIFICATION ---
+
       } catch (error: any) {
         alert(
           "Something went wrong: " +
@@ -159,11 +166,12 @@ const Agent = ({
         );
         setCallStatus(CallStatus.INACTIVE);
       }
-      return; // Exit the function after handling 'generate' type
+      return;
     }
 
-    // --- Original code for 'normal' interview type (unchanged, assuming it works for its purpose) ---
-    if (!interviewer) {
+    // --- This part of the code is for 'normal' interview type, where `interviewer` (Assistant) is used ---
+    // This is where the `interviewer` Assistant's system prompt and `{{questions}}` placeholder would be relevant.
+    if (!interviewer) { // Note: 'interviewer' here is an object, not directly a falsy value. This check might need adjustment.
       alert("Assistant (interviewer) must be provided to start the call.");
       setCallStatus(CallStatus.INACTIVE);
       return;
@@ -175,7 +183,7 @@ const Agent = ({
     }
 
     try {
-      await vapi.start(interviewer, {
+      await vapi.start(interviewer, { // Here, passing the 'interviewer' Assistant object is appropriate
         variableValues: {
           questions: formattedQuestions,
         },
