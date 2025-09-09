@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { interviewer } from "@/constants";
+import { interviewer } from "@/constants"; // Keep this if used elsewhere, but not directly for 'generate' flow
 import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
@@ -20,6 +20,17 @@ interface SavedMessage {
   role: "user" | "system" | "assistant";
   content: string;
 }
+
+// Assuming AgentProps is defined elsewhere, no change needed here
+interface AgentProps {
+  userName: string;
+  userId: string;
+  interviewId: string | null;
+  feedbackId: string | null;
+  type: "generate" | "normal"; // Assuming 'type' can be 'generate' or 'normal'
+  questions?: string[]; // Assuming 'questions' is an array of strings
+}
+
 
 const Agent = ({
   userName,
@@ -44,7 +55,7 @@ const Agent = ({
       setCallStatus(CallStatus.FINISHED);
     };
 
-    const onMessage = (message: Message) => {
+    const onMessage = (message: any) => { // Use 'any' or define Vapi's Message type if available
       if (
         message.type === "transcript" &&
         message.transcriptType === "final"
@@ -89,9 +100,15 @@ const Agent = ({
     }
 
     const handleGenerateFeedback = async (messages: SavedMessage[]) => {
+      // Ensure interviewId is not null for createFeedback
+      if (!interviewId) {
+        console.error("Interview ID is null, cannot generate feedback.");
+        router.push("/"); // Redirect if critical info is missing
+        return;
+      }
       const { success, feedbackId: id } = await createFeedback({
-        interviewId: interviewId!,
-        userId: userId!,
+        interviewId: interviewId,
+        userId: userId!, // Ensure userId is handled correctly, possibly non-null asserted or checked
         transcript: messages,
         feedbackId,
       });
@@ -105,39 +122,36 @@ const Agent = ({
 
     if (callStatus === CallStatus.FINISHED) {
       if (type === "generate") {
-        router.push("/");
+        router.push("/"); // Redirect after generating (if that's the desired flow)
       } else {
         handleGenerateFeedback(messages);
       }
     }
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
-  // UPDATED FUNCTION
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
 
     if (type === "generate") {
-      if (
-        !process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID &&
-        !interviewer
-      ) {
-        alert("Assistant or Workflow ID must be provided to start the call.");
+      const workflowIdToUse = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+
+      // --- CRITICAL CHANGE: Simplified check and vapi.start() call ---
+      if (!workflowIdToUse) {
+        alert("Vapi Workflow ID must be provided to start the call for 'generate' type.");
         setCallStatus(CallStatus.INACTIVE);
         return;
       }
+
       try {
-        await vapi.start(
-          interviewer,
-          undefined,
-          undefined,
-          process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID,
-          {
-            variableValues: {
-              username: userName,
-              userid: userId,
-            },
-          }
-        );
+        await vapi.start({ // Pass a single options object to vapi.start
+          workflowId: workflowIdToUse, // Explicitly use the workflow ID
+          variableValues: {
+            username: userName,
+            userid: userId,
+            // (level, amount, techstack, role, type are collected by Vapi's workflow,
+            // so they are NOT passed from here)
+          },
+        });
       } catch (error: any) {
         alert(
           "Something went wrong: " +
@@ -145,10 +159,10 @@ const Agent = ({
         );
         setCallStatus(CallStatus.INACTIVE);
       }
-      return;
+      return; // Exit the function after handling 'generate' type
     }
 
-    // For normal interview (not generate)
+    // --- Original code for 'normal' interview type (unchanged, assuming it works for its purpose) ---
     if (!interviewer) {
       alert("Assistant (interviewer) must be provided to start the call.");
       setCallStatus(CallStatus.INACTIVE);
