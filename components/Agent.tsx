@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { interviewer } from "@/constants"; // Keep this import for the 'normal' type flow
+import { interviewer } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
@@ -20,16 +20,6 @@ interface SavedMessage {
   role: "user" | "system" | "assistant";
   content: string;
 }
-
-interface AgentProps {
-  userName: string;
-  userId: string;
-  interviewId?: string;
-  feedbackId?: string;
-  type: "generate" | "normal";
-  questions?: string[];
-}
-
 
 const Agent = ({
   userName,
@@ -54,7 +44,7 @@ const Agent = ({
       setCallStatus(CallStatus.FINISHED);
     };
 
-    const onMessage = (message: any) => {
+    const onMessage = (message: Message) => {
       if (
         message.type === "transcript" &&
         message.transcriptType === "final"
@@ -99,16 +89,11 @@ const Agent = ({
     }
 
     const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      if (!interviewId || !userId) {
-        console.error("Missing interviewId or userId for feedback generation.");
-        router.push("/");
-        return;
-      }
       const { success, feedbackId: id } = await createFeedback({
-        interviewId: interviewId,
-        userId: userId,
+        interviewId: interviewId!,
+        userId: userId!,
         transcript: messages,
-        feedbackId: feedbackId,
+        feedbackId,
       });
 
       if (success && id) {
@@ -127,38 +112,32 @@ const Agent = ({
     }
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
+  // UPDATED FUNCTION
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
 
     if (type === "generate") {
-      const workflowIdToUse = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
-
-      if (!workflowIdToUse) {
-        alert("Vapi Workflow ID must be provided to start the call for 'generate' type.");
+      if (
+        !process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID &&
+        !interviewer
+      ) {
+        alert("Assistant or Workflow ID must be provided to start the call.");
         setCallStatus(CallStatus.INACTIVE);
         return;
       }
-
       try {
-        // --- THIS IS THE CRITICAL MODIFICATION ---
-        // Explicitly start the Vapi call using the workflowId, not the 'interviewer' Assistant object.
-        await vapi.start({
-          workflowId: workflowIdToUse, // This correctly targets your Vapi Workflow
-          variableValues: {
-            username: userName,
-            userid: userId,
-          },
-          // You can still merge other Assistant properties if your workflow doesn't define them
-          // and you want specific voice/model settings from your 'interviewer' constant.
-          // For instance:
-          // assistant: {
-          //   model: interviewer.model,
-          //   voice: interviewer.voice,
-          //   // Do NOT include systemPrompt from interviewer if you want your Vapi Workflow's prompt to apply
-          // }
-        });
-        // --- END OF CRITICAL MODIFICATION ---
-
+        await vapi.start(
+          interviewer,
+          undefined,
+          undefined,
+          process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID,
+          {
+            variableValues: {
+              username: userName,
+              userid: userId,
+            },
+          }
+        );
       } catch (error: any) {
         alert(
           "Something went wrong: " +
@@ -169,9 +148,8 @@ const Agent = ({
       return;
     }
 
-    // --- This part of the code is for 'normal' interview type, where `interviewer` (Assistant) is used ---
-    // This is where the `interviewer` Assistant's system prompt and `{{questions}}` placeholder would be relevant.
-    if (!interviewer) { // Note: 'interviewer' here is an object, not directly a falsy value. This check might need adjustment.
+    // For normal interview (not generate)
+    if (!interviewer) {
       alert("Assistant (interviewer) must be provided to start the call.");
       setCallStatus(CallStatus.INACTIVE);
       return;
@@ -183,7 +161,7 @@ const Agent = ({
     }
 
     try {
-      await vapi.start(interviewer, { // Here, passing the 'interviewer' Assistant object is appropriate
+      await vapi.start(interviewer, {
         variableValues: {
           questions: formattedQuestions,
         },
